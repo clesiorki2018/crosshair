@@ -49,9 +49,8 @@
 #define WINDOW_HEIGHT		230
 #define CROSSHAIR_X		(WINDOW_WIDTH / 2)
 #define CROSSHAIR_Y		60
-#define CLOSE_BUTTON_SIZE	22
-#define CLOSE_BUTTON_MARGIN	8
-#define CLOSE_BUTTON_TOP	200
+#define CLOSE_BUTTON_SIZE	10
+#define CLOSE_BUTTON_MARGIN	0
 #define FRAME_DELAY_NS		16000000L
 
 /*
@@ -98,6 +97,7 @@ struct app {
 	Visual *visual;
 	Colormap colormap;
 	Window window;
+	Window close_window;
 	GC gc;
 	struct monitor_geometry monitor;
 	struct paint_colors colors;
@@ -283,12 +283,13 @@ static struct point overlay_position(const struct monitor_geometry *monitor)
 	return position;
 }
 
-/* Posicao do canto superior esquerdo do botao de fechar dentro da janela. */
-static struct point close_button_position(void)
+/* Posicao do canto superior esquerdo do botao de fechar no monitor. */
+static struct point close_button_position(const struct monitor_geometry *monitor)
 {
 	struct point position = {
-		.x = WINDOW_WIDTH - CLOSE_BUTTON_MARGIN - CLOSE_BUTTON_SIZE,
-		.y = CLOSE_BUTTON_TOP,
+		.x = monitor->x + monitor->width - CLOSE_BUTTON_MARGIN -
+		     CLOSE_BUTTON_SIZE,
+		.y = monitor->y + CLOSE_BUTTON_MARGIN,
 	};
 
 	return position;
@@ -297,12 +298,10 @@ static struct point close_button_position(void)
 /* Retorna true quando um clique caiu dentro do retangulo do botao de fechar. */
 static bool is_close_button_hit(int x, int y)
 {
-	struct point button = close_button_position();
-
-	return x >= button.x &&
-	       x < button.x + CLOSE_BUTTON_SIZE &&
-	       y >= button.y &&
-	       y < button.y + CLOSE_BUTTON_SIZE;
+	return x >= 0 &&
+	       x < CLOSE_BUTTON_SIZE &&
+	       y >= 0 &&
+	       y < CLOSE_BUTTON_SIZE;
 }
 
 /*
@@ -361,19 +360,17 @@ static void draw_crosshair(Display *display, Window window, GC gc,
 static void draw_close_button(Display *display, Window window, GC gc,
 			      const struct paint_colors *colors)
 {
-	struct point button = close_button_position();
-	int right = button.x + CLOSE_BUTTON_SIZE - 7;
-	int bottom = button.y + CLOSE_BUTTON_SIZE - 7;
+	const int padding = 3;
+	const int right = CLOSE_BUTTON_SIZE - padding - 1;
+	const int bottom = CLOSE_BUTTON_SIZE - padding - 1;
 
 	XSetForeground(display, gc, colors->red);
-	XFillRectangle(display, window, gc, button.x, button.y,
+	XFillRectangle(display, window, gc, 0, 0,
 		       CLOSE_BUTTON_SIZE, CLOSE_BUTTON_SIZE);
 
 	XSetForeground(display, gc, colors->white);
-	XDrawLine(display, window, gc, button.x + 6, button.y + 6,
-		  right, bottom);
-	XDrawLine(display, window, gc, right, button.y + 6,
-		  button.x + 6, bottom);
+	XDrawLine(display, window, gc, padding, padding, right, bottom);
+	XDrawLine(display, window, gc, right, padding, padding, bottom);
 }
 
 /*
@@ -385,8 +382,10 @@ static void draw_close_button(Display *display, Window window, GC gc,
 static void draw_overlay(const struct app *app)
 {
 	XClearWindow(app->display, app->window);
+	XClearWindow(app->display, app->close_window);
 	draw_crosshair(app->display, app->window, app->gc, app->colors.green);
-	draw_close_button(app->display, app->window, app->gc, &app->colors);
+	draw_close_button(app->display, app->close_window, app->gc,
+			  &app->colors);
 }
 
 /*
@@ -426,6 +425,39 @@ static Window create_overlay_window(struct app *app)
 			     WINDOW_WIDTH, WINDOW_HEIGHT, 0, depth, InputOutput,
 			     window_visual,
 			     CWBackPixel | CWBorderPixel | CWColormap |
+			     CWOverrideRedirect | CWEventMask,
+			     &attrs);
+}
+
+/* Cria uma janelinha dedicada para o botao de fechar no canto do monitor. */
+static Window create_close_window(struct app *app)
+{
+	Window root = RootWindow(app->display, app->screen);
+	Visual *window_visual;
+	XSetWindowAttributes attrs;
+	struct point position;
+	int depth;
+
+	if (app->visual) {
+		depth = 32;
+		window_visual = app->visual;
+	} else {
+		depth = DefaultDepth(app->display, app->screen);
+		window_visual = DefaultVisual(app->display, app->screen);
+	}
+
+	position = close_button_position(&app->monitor);
+
+	attrs.background_pixel = 0;
+	attrs.border_pixel = 0;
+	attrs.colormap = app->colormap;
+	attrs.override_redirect = True;
+	attrs.event_mask = ExposureMask | ButtonPressMask | StructureNotifyMask;
+
+	return XCreateWindow(app->display, root, position.x, position.y,
+			     CLOSE_BUTTON_SIZE, CLOSE_BUTTON_SIZE, 0, depth,
+			     InputOutput, window_visual,
+			     CWBackPixel | CWBorderPixel | CWColormap |
 				     CWOverrideRedirect | CWEventMask,
 			     &attrs);
 }
@@ -449,6 +481,7 @@ static bool app_init(struct app *app)
 	app->monitor = detect_first_monitor(app->display, app->screen);
 	app->visual = find_argb_visual(app->display, app->screen);
 	app->window = create_overlay_window(app);
+	app->close_window = create_close_window(app);
 	app->gc = XCreateGC(app->display, app->window, 0, NULL);
 	app->colors = prepare_paint_colors(app->display, app->screen,
 					   app->visual);
@@ -457,6 +490,7 @@ static bool app_init(struct app *app)
 	XSetLineAttributes(app->display, app->gc, 3, LineSolid, CapRound,
 			   JoinRound);
 	XMapRaised(app->display, app->window);
+	XMapRaised(app->display, app->close_window);
 
 	return true;
 }
@@ -475,6 +509,7 @@ static void app_handle_event(struct app *app, const XEvent *event)
 	}
 
 	if (event->type == ButtonPress &&
+	    event->xbutton.window == app->close_window &&
 	    is_close_button_hit(event->xbutton.x, event->xbutton.y))
 		app->running = false;
 }
@@ -518,6 +553,9 @@ static void app_destroy(struct app *app)
 
 	if (app->window)
 		XDestroyWindow(app->display, app->window);
+
+	if (app->close_window)
+		XDestroyWindow(app->display, app->close_window);
 
 	if (app->colormap)
 		XFreeColormap(app->display, app->colormap);
