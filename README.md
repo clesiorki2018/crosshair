@@ -24,7 +24,8 @@ De forma resumida:
 1. O programa conecta no servidor grafico X11.
 2. Ele descobre o tamanho e a posicao do primeiro monitor.
 3. Ele cria uma janela transparente, sem borda e por cima das outras.
-4. Ele desenha a mira e um botao vermelho de fechar.
+4. Ele desenha a mira e um botao vermelho de fechar no canto superior direito
+   do primeiro monitor.
 5. Ele fica em loop redesenhando a janela e lendo cliques do mouse.
 6. Quando o botao vermelho recebe clique, o programa encerra.
 
@@ -74,7 +75,7 @@ make run
 
 ## Como fechar
 
-Clique no botao vermelho com `X` dentro da propria janela do overlay.
+Clique no botao vermelho com `X` no canto superior direito do primeiro monitor.
 
 Se precisar encerrar pelo terminal:
 
