@@ -1,0 +1,24 @@
+# Objetos e binarios de C
+*.o
+*.a
+*.so
+*.out
+crosshair
+
+# Arquivos temporarios de editores
+*~
+*.swp
+*.swo
+.vscode/*
+!.vscode/c_cpp_properties.json
+.idea/
+
+# Arquivos locais do sistema
+.DS_Store
+Thumbs.db
+
+# Logs e relatorios gerados localmente
+*.log
+*.gcda
+*.gcno
+coverage/
